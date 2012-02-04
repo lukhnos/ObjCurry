@@ -27,16 +27,27 @@
 #import "CurryProxy.h"
 #import <objc/runtime.h>
 
-static NSString *const kProxyClassSuffix = @"_CurryProxy";
+static NSString *const kProxyClassInfix = @"_CurryProxy_";
 
+
+// NOTE: strcasecmp will cause other problems in other more complicated data types!!
 static BOOL ArgumentTypeSupported(const char *type)
 {
-    return !strcmp(type, @encode(id));
+    // these types are supported; we ignore the signedness since we only care about the size of a type
+    return !strcasecmp(type, @encode(id))
+        || !strcasecmp(type, @encode(uint8_t))
+        || !strcasecmp(type, @encode(uint16_t))
+        || !strcasecmp(type, @encode(uint32_t))
+        || !strcasecmp(type, @encode(uint64_t))
+        || !strcasecmp(type, @encode(float))
+        || !strcasecmp(type, @encode(double))
+        || !strcasecmp(type, @encode(id *))
+        || !strcasecmp(type, @encode(void *));
 }
 
 static BOOL ReturnTypeSupported(const char *type)
 {
-    return !strcmp(type, @encode(id));
+    return !strcasecmp(type, @encode(void)) || ArgumentTypeSupported(type);
 }
 
 static char *CreateMethodSignature(const char *argType)
@@ -104,9 +115,10 @@ static void SetError(NSError **error, NSString *message)
     NSAssert([matches count] == argumentCount, @"Number of method arguments in the selector and that in the signature must match");
 
     // fetch the proxy class; if it doesn't exist, create it
-    // for class Foo, the created proxy class will be called Foo_CurryProxy
-    // (or anything defined in kProxyClassSuffix)
-    NSString *proxyClassName = [NSString stringWithFormat:@"%@%@", NSStringFromClass(self), kProxyClassSuffix];
+    // for class Foo, the created proxy class will be called Foo_<infix>_<method name>
+
+    NSString *colonReplacedMethodName = [selString stringByReplacingOccurrencesOfString:@":" withString:@"_"];
+    NSString *proxyClassName = [NSString stringWithFormat:@"%@%@%@", NSStringFromClass(self), kProxyClassInfix, colonReplacedMethodName];
     Class proxyClass = NSClassFromString(proxyClassName);
     if (!proxyClass) {
         proxyClass = objc_allocateClassPair([CurryProxy class], [proxyClassName UTF8String], 0);
@@ -124,16 +136,32 @@ static void SetError(NSError **error, NSString *message)
         const char *argumentType = [signature getArgumentTypeAtIndex:(i + 2)];
 
         IMP methodIMP = NULL;
-        if (!strcmp(argumentType, @encode(id))) {
-            methodIMP = imp_implementationWithBlock(^(id _self, NSUInteger argIndex, id arg) {
-                [[_self invocation] setArgument:&arg atIndex:(argIndex + 2)];
-                return _self;
-            });
+
+        // use macro to make our life easier to create the IMP for each type
+        if (0) {
         }
+#define PROXY_METHOD_IMP_FOR_TYPE(t) \
+        else if (!strcasecmp(argumentType, @encode(t))) { \
+            methodIMP = imp_implementationWithBlock(^(id _self,t arg) { \
+                [[_self invocation] setArgument:&arg atIndex:(i + 2)]; \
+                return _self; \
+            }); \
+        }
+        PROXY_METHOD_IMP_FOR_TYPE(id)
+        PROXY_METHOD_IMP_FOR_TYPE(uint8_t)
+        PROXY_METHOD_IMP_FOR_TYPE(uint16_t)
+        PROXY_METHOD_IMP_FOR_TYPE(uint32_t)
+        PROXY_METHOD_IMP_FOR_TYPE(uint64_t)
+        PROXY_METHOD_IMP_FOR_TYPE(float)
+        PROXY_METHOD_IMP_FOR_TYPE(double)
+        PROXY_METHOD_IMP_FOR_TYPE(id *)
+        PROXY_METHOD_IMP_FOR_TYPE(void *)
+#undef PROXY_METHOD_IMP_FOR_TYPE
         else {
             // why are we ever here if we've checked?
             NSAssert(NO, @"Invalid argument type");
         }
+
 
         SEL sel = NSSelectorFromString(methodName);
         char *newMethodSignature = CreateMethodSignature(argumentType);
@@ -153,17 +181,121 @@ static void SetError(NSError **error, NSString *message)
         const char *returnType = [signature methodReturnType];
 
         IMP methodIMP = NULL;
-        if (!strcmp(argumentType, @encode(id)) && !strcmp(returnType, @encode(id))) {
-            methodIMP = imp_implementationWithBlock(^(id _self, id arg) {
-                NSInvocation *invocation = [_self invocation];
-                [invocation setArgument:&arg atIndex:(lastArgumentIndex + 2)];
-                [invocation invoke];
 
-                id returnValue;
-                [invocation getReturnValue:&returnValue];
-                return returnValue;
-            });
+        // here's the annoying part, for x argument types and y return types, we need to have x*y impl's
+        if (0) {
         }
+#define LAST_METHOD_IMP_FOR_ARG_TYPE_AND_VOID_RETURN(ta) \
+        else if (!strcasecmp(argumentType, @encode(ta)) && !strcasecmp(returnType, @encode(void))) { \
+            methodIMP = imp_implementationWithBlock(^(id _self, ta arg) { \
+                NSInvocation *invocation = [_self invocation]; \
+                [invocation setArgument:&arg atIndex:(lastArgumentIndex + 2)]; \
+                [invocation invoke]; \
+            }); \
+        }
+#define LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(ta, tr) \
+        else if (!strcasecmp(argumentType, @encode(ta)) && !strcasecmp(returnType, @encode(tr))) { \
+            methodIMP = imp_implementationWithBlock(^(id _self, ta arg) { \
+                NSInvocation *invocation = [_self invocation]; \
+                [invocation setArgument:&arg atIndex:(lastArgumentIndex + 2)]; \
+                [invocation invoke]; \
+                tr returnValue; \
+                [invocation getReturnValue:&returnValue]; \
+                return returnValue; \
+            }); \
+        }
+        LAST_METHOD_IMP_FOR_ARG_TYPE_AND_VOID_RETURN(id)
+        LAST_METHOD_IMP_FOR_ARG_TYPE_AND_VOID_RETURN(uint8_t)
+        LAST_METHOD_IMP_FOR_ARG_TYPE_AND_VOID_RETURN(uint16_t)
+        LAST_METHOD_IMP_FOR_ARG_TYPE_AND_VOID_RETURN(uint32_t)
+        LAST_METHOD_IMP_FOR_ARG_TYPE_AND_VOID_RETURN(uint64_t)
+        LAST_METHOD_IMP_FOR_ARG_TYPE_AND_VOID_RETURN(double)
+        LAST_METHOD_IMP_FOR_ARG_TYPE_AND_VOID_RETURN(double)
+        LAST_METHOD_IMP_FOR_ARG_TYPE_AND_VOID_RETURN(id *)
+        LAST_METHOD_IMP_FOR_ARG_TYPE_AND_VOID_RETURN(void *)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(id, id)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint8_t, id)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint16_t, id)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint32_t, id)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint64_t, id)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(float, id)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(double, id)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(id *, id)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(void *, id)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(id, uint8_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint8_t, uint8_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint16_t, uint8_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint32_t, uint8_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint64_t, uint8_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(float, uint8_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(double, uint8_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(id *, uint8_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(void *, uint8_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(id, uint16_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint8_t, uint16_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint16_t, uint16_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint32_t, uint16_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint64_t, uint16_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(float, uint16_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(double, uint16_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(id *, uint16_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(void *, uint16_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(id, uint32_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint8_t, uint32_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint16_t, uint32_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint32_t, uint32_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint64_t, uint32_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(float, uint32_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(double, uint32_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(id *, uint32_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(void *, uint32_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(id, uint64_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint8_t, uint64_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint16_t, uint64_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint32_t, uint64_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint64_t, uint64_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(float, uint64_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(double, uint64_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(id *, uint64_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(void *, uint64_t)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(id, float)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint8_t, float)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint16_t, float)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint32_t, float)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint64_t, float)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(float, float)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(double, float)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(id *, float)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(void *, float)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(id, double)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint8_t, double)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint16_t, double)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint32_t, double)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint64_t, double)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(double, double)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(double, double)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(id *, double)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(void *, double)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(id, id *)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint8_t, id *)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint16_t, id *)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint32_t, id *)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint64_t, id *)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(double, id *)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(double, id *)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(id *, id *)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(void *, id *)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(id, void *)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint8_t, void *)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint16_t, void *)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint32_t, void *)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(uint64_t, void *)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(double, void *)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(double, void *)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(id *, void *)
+        LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES(void *, void *)
+#undef LAST_METHOD_IMP_FOR_ARG_TYPE_AND_VOID_RETURN
+#undef LAST_METHOD_IMP_FOR_ARG_AND_RETURN_TYPES
         else {
             // why are we ever here if we've checked?
             NSAssert(NO, @"Invalid argument type");
@@ -186,13 +318,27 @@ static void SetError(NSError **error, NSString *message)
         const char *argumentType = [signature getArgumentTypeAtIndex:(0 + 2)];
 
         IMP methodIMP = NULL;
-        if (!strcmp(argumentType, @encode(id))) {
-            methodIMP = imp_implementationWithBlock(^(id _self, id arg) {
-                id proxyObject = [[[proxyClass alloc] initWithMethodSignature:signature selector:selector target:_self] autorelease];
-                [[proxyObject invocation] setArgument:&arg atIndex:(0 + 2)];
-                return proxyObject;
-            });
+
+        if (0) {
         }
+#define FIRST_METHOD_IMP_FOR_TYPE(t) \
+        else if (!strcasecmp(argumentType, @encode(t))) { \
+            methodIMP = imp_implementationWithBlock(^(id _self, t arg) { \
+                id proxyObject = [[[proxyClass alloc] initWithMethodSignature:signature selector:selector target:_self] autorelease]; \
+                [[proxyObject invocation] setArgument:&arg atIndex:(0 + 2)]; \
+                return proxyObject; \
+            }); \
+        }
+        FIRST_METHOD_IMP_FOR_TYPE(id)
+        FIRST_METHOD_IMP_FOR_TYPE(uint8_t)
+        FIRST_METHOD_IMP_FOR_TYPE(uint16_t)
+        FIRST_METHOD_IMP_FOR_TYPE(uint32_t)
+        FIRST_METHOD_IMP_FOR_TYPE(uint64_t)
+        FIRST_METHOD_IMP_FOR_TYPE(float)
+        FIRST_METHOD_IMP_FOR_TYPE(double)
+        FIRST_METHOD_IMP_FOR_TYPE(id *)
+        FIRST_METHOD_IMP_FOR_TYPE(void *)
+#undef FIRST_METHOD_IMP_FOR_TYPE
         else {
             // why are we ever here if we've checked?
             NSAssert(NO, @"Invalid argument type");
