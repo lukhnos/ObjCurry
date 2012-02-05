@@ -143,8 +143,9 @@ static void SetError(NSError **error, NSString *message)
 #define PROXY_METHOD_IMP_FOR_TYPE(t) \
         else if (!strcasecmp(argumentType, @encode(t))) { \
             methodIMP = imp_implementationWithBlock(^(id _self,t arg) { \
-                [[_self invocation] setArgument:&arg atIndex:(i + 2)]; \
-                return _self; \
+                id newProxy = [[_self copy] autorelease]; \
+                [[newProxy invocation] setArgument:&arg atIndex:(i + 2)]; \
+                return newProxy; \
             }); \
         }
         PROXY_METHOD_IMP_FOR_TYPE(id)

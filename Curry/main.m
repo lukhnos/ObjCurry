@@ -123,6 +123,14 @@ int main (int argc, const char * argv[])
         k = 10;
         l = [multiplyByIWithJ dividedBy:k];
         NSLog(@"i: %f, j: %f, k: %f, l = i * j / k = %f", i, j, k, l);
+
+
+        // this should not disrupt the execution of the next
+        [multiplyByI withDouble:1];
+
+        k = 10;
+        l = [multiplyByIWithJ dividedBy:k]; // should be the same as the previous call when k = 10
+        NSLog(@"i: %f, j: %f, k: %f, l = i * j / k = %f", i, j, k, l);
     }
 
     return 0;

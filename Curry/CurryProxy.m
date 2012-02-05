@@ -38,6 +38,28 @@
     return self;
 }
 
+// make a copy of the proxy object; we need to make a copy of the invocation object
+// (calling -[NSInvocation copy] won't get what you expect)
+- (id)copy
+{
+    NSMethodSignature *signature = [invocation methodSignature];
+    SEL selector = [invocation selector];
+    id target = [invocation target];
+
+    CurryProxy *newProxy = [[[self class] alloc] initWithMethodSignature:signature selector:selector target:target];
+
+    size_t frameSize = [signature frameLength];
+    char buf[frameSize];
+    for (NSUInteger i = 2, c = [signature numberOfArguments]; i < c; i++) {
+        bzero(buf, frameSize);
+
+        [invocation getArgument:&buf atIndex:i];
+        [[newProxy invocation] setArgument:&buf atIndex:i];
+    }
+
+    return newProxy;
+}
+
 - (void)dealloc
 {
     [invocation release];
