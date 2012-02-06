@@ -69,14 +69,35 @@
 - (double)dividedBy:(double)z;
 @end
 
+@interface NSMutableDictionary (Curried)
+- (id)setObject:(id)object;
+- (void)forKey:(id)key;
+@end
+
 int main (int argc, const char * argv[])
 {
     @autoreleasepool {
+        
+        // example for currying a Foundation class's instance methods
+        
+        [[NSMutableDictionary class] curry:@selector(setObject:forKey:)];
+        
+        NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithObjectsAndKeys:@"bar", @"foo", nil];
+        NSLog(@"dict: %@", dict);
+        
+        id dictSetBarWithKey = [dict setObject:@"bar"];
+        [dictSetBarWithKey forKey:@"blah"];
+        [dictSetBarWithKey forKey:@"tralahlah"];
+        [dictSetBarWithKey forKey:@"ohlala"];
+        NSLog(@"now dict: %@", dict);
+
+        
+        // example for currying our own classes's methods
+        
         [[Foo class] curry:@selector(addNumber:withNumber:)];
         [[Foo class] curry:@selector(add:with:)];
         [[Foo class] curry:@selector(multiply:withDouble:dividedBy:)];
-
-
+        
         Foo *foo = [[[Foo alloc] init] autorelease];
         NSNumber *x = [NSNumber numberWithDouble:10.0];
         NSNumber *y = [NSNumber numberWithDouble:20.0];
