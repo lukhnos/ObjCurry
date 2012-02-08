@@ -35,7 +35,7 @@ possible to write:
 In fact, since Objective-C now has blocks, we can write this instead:
 
     SomeClass *foo = [[SomeClass alloc] init];
-    void (^fooABAnd)(id) = ^(id x) { [foo doThis:a withThat:b andThat:x]; }
+    void (^fooABAnd)(id) = ^(id x) { [foo doThis:a withThat:b andThat:x]; };
 
 The problem with that is you have to write it in an ad-hoc fashion, i.e. you
 need to write such a block each time you need it. And, if you want to do
@@ -113,7 +113,7 @@ be warned.
 Then there's the issue why it's not the real thing. By definition, curry
 is an operation that turns a function
 
-    f: (t_0, t_1, t_2, ..., t_n) -> t_n+1
+    f: t_0 x t_1 x t_2 x ... x t_n) -> t_n+1
 
 into
 
@@ -141,7 +141,7 @@ notation:
 
 And what Curry does is turning that into something like:
 
-    cm: (ot -> a1t) -> ((pt -> a2t) -> (pt -> a3t) ... -> returnType)
+    cm: (ot x a1t) -> ((pt x a2t) -> (pt x a3t) ... -> returnType)
 
 Here `cm` stands for `curriedMethod`, `ot` for `objType`, `a1t` for
 `arg1Type`, and `pt` stands for `proxyObjectType`.
