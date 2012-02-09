@@ -1,6 +1,6 @@
-# Curry
+# ObjCurry
 
-Curry studies the possibility of introducing currying to Objective-C and the
+ObjCurry studies the possibility of introducing currying to Objective-C and the
 various issues that come with it.
 
 Please note that this is not the real "currying" by the strict definition,
@@ -8,6 +8,8 @@ and I'll explain the reason below. Plus, adding such language features to
 an imperative, objected-oriented language like Objective-C has lots of other
 issues. So this project is exploratory, not something intended for production
 use.
+
+I've also written a more detailed explanation of the project as a blog post, at http://blog.lukhnos.org/post/17270947434/currying-objective-c-methods
 
 
 ## Motivation
